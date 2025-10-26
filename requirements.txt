@@ -1,0 +1,6 @@
+psycopg2-binary
+pandas
+numpy
+pyyaml
+python-dotenv
+click
