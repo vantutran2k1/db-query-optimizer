@@ -1,0 +1,3 @@
+connection:
+  statement_timeout: '5min'
+  client_encoding: 'utf8'

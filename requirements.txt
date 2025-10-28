@@ -1,6 +1,10 @@
 psycopg2-binary
+
 pandas
-numpy
+pyarrow
+
 pyyaml
 python-dotenv
 click
+
+tqdm

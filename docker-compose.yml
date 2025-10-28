@@ -2,6 +2,7 @@ services:
   postgres_db:
     image: postgres:13-alpine
     container_name: postgres_db
+    shm_size: '1g'
     env_file:
       - .env
     volumes:

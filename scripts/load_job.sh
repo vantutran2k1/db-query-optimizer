@@ -10,6 +10,7 @@ DB_NAME="${DB_NAME}"
 export PGPASSWORD="${DB_PASSWORD}"
 
 SCHEMA_FILE="/app/benchmarks/job/schema.sql"
+INDEX_FILE="/app/benchmarks/job/fkindexes.sql"
 DATA_DIR="/app/benchmarks/job/data"
 
 echo "--- Starting JOB Benchmark Load ---"
@@ -85,7 +86,11 @@ psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -c \
 psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -c \
   "\copy title FROM '${DATA_DIR}/title.csv' WITH (FORMAT csv, HEADER true, DELIMITER ',', ESCAPE '\');"
 
-# 3. Analyze the database
+# 3. Apply Foreign Key Indexes
+echo "Applying indexes from ${INDEX_FILE}..."
+psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -f "$INDEX_FILE"
+
+# 4. Analyze the database
 echo "Running VACUUM ANALYZE..."
 psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -c "VACUUM ANALYZE;"
 
