@@ -8,3 +8,7 @@ python-dotenv
 click
 
 tqdm
+
+scikit-learn
+torch
+joblib
