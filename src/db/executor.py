@@ -73,3 +73,48 @@ def measure_query(
     finally:
         if conn:
             db_connector.release_connection(conn)
+
+
+def get_plan_json(
+    db_connector: DatabaseConnector,
+    query_sql: str,
+    settings: Optional[List[str]] = None,
+) -> Optional[Dict[str, Any]]:
+    conn = None
+    try:
+        conn = db_connector.get_connection()
+
+        with conn.cursor() as cursor:
+            # Use BEGIN...ROLLBACK to ensure settings are transaction-scoped
+            cursor.execute("BEGIN;")
+
+            if settings:
+                for setting in settings:
+                    cursor.execute(setting)
+
+            # Run EXPLAIN (FORMAT JSON) - no ANALYZE
+            explain_command = f"EXPLAIN (FORMAT JSON) {query_sql}"
+            cursor.execute(explain_command)
+
+            result_json = cursor.fetchone()[0]
+            if not result_json:
+                raise ValueError("EXPLAIN command returned no result.")
+
+            explain_data = result_json[0]
+
+            # Always rollback
+            cursor.execute("ROLLBACK;")
+
+            return explain_data["Plan"]  # Return only the 'Plan' tree
+
+    except (psycopg2.Error, ValueError, KeyError) as e:
+        # A plan might be invalid with certain settings (e.g., all joins off)
+        # This is not an error, just an invalid candidate.
+        print(f"[Executor Info] Could not get plan for settings: {e}")
+        if conn:
+            conn.rollback()
+        return None  # Return None for invalid plans
+
+    finally:
+        if conn:
+            db_connector.release_connection(conn)

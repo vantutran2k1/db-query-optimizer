@@ -10,5 +10,6 @@ click
 tqdm
 
 scikit-learn
+xgboost
 torch
 joblib

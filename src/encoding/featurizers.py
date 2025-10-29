@@ -118,7 +118,7 @@ class SimpleFeaturizer(BaseFeaturizer):
 
             nodes.append(current_node)
 
-            if "Plans" in current_node:
+            if "Plans" in current_node and current_node["Plans"] is not None:
                 for child in current_node["Plans"]:
                     stack.append(child)
         return nodes

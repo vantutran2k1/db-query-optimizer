@@ -1,3 +1,4 @@
+import os
 import time
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any, Callable
@@ -5,10 +6,23 @@ from typing import Optional, Dict, Any, Callable
 
 class BaseOptimizer(ABC):
     def __init__(self, optimizer_name: str):
-        self._optimizer_name = optimizer_name
+        self.optimizer_name = optimizer_name
+
+        self._model_path: str = ""
+        self._featurizer_path: str = ""
+
+        os.makedirs("models", exist_ok=True)
+
+    @property
+    def model_path(self) -> str:
+        return self._model_path
+
+    @property
+    def featurizer_path(self) -> str:
+        return self._featurizer_path
 
     def train(self, training_data_path: str, config: Optional[Dict[str, Any]] = None):
-        print(f"[{self._optimizer_name}] Training not applicable")
+        print(f"[{self.optimizer_name}] Training not applicable")
         pass
 
     @abstractmethod

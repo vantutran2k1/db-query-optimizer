@@ -208,5 +208,6 @@ __marimo__/
 
 benchmarks/job/data
 results/
+models/
 
 .DS_Store
