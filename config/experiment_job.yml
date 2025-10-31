@@ -1,0 +1,26 @@
+experiment_name: "JOB_BaseQuery_Split"
+benchmark: "job"
+output_file: "results/job_basequery_results.csv"
+
+# 'random', 'leave_one_out', or 'base_query'
+split_strategy: "base_query"
+split_test_size: 0.3 # 30% of families in test set
+split_random_seed: 42
+
+lqo_training_data: "results/job_training_data_cache.parquet"
+
+# List of optimizer *class names* to import and test.
+# These must match the class names in src/optimizers/
+optimizers:
+  - name: "PostgresOptimizer"
+    config: { } # No config needed
+
+  - name: "PostgresGEQOOptimizer"
+    config:
+      geqo_threshold: 2
+
+  - name: "XGBoostLQO"
+    config:
+      # XGBoost Hyperparameters
+      n_estimators: 100
+      learning_rate: 0.1

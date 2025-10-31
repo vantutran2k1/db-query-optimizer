@@ -29,7 +29,8 @@ def measure_query(
             # 1. Apply session-local settings (e.g., disable hashjoin)
             if settings:
                 for setting in settings:
-                    cursor.execute(setting)
+                    local_setting = setting.replace("SET ", "SET LOCAL ")
+                    cursor.execute(local_setting)
 
             # 2. Run 1 (Warm-up):
             cursor.execute(query_sql)
@@ -90,7 +91,8 @@ def get_plan_json(
 
             if settings:
                 for setting in settings:
-                    cursor.execute(setting)
+                    local_setting = setting.replace("SET ", "SET LOCAL ")
+                    cursor.execute(local_setting)
 
             # Run EXPLAIN (FORMAT JSON) - no ANALYZE
             explain_command = f"EXPLAIN (FORMAT JSON) {query_sql}"
