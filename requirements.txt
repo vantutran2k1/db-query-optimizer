@@ -13,3 +13,7 @@ scikit-learn
 xgboost
 torch
 joblib
+
+matplotlib
+seaborn
+scipy
