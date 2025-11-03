@@ -1,6 +1,7 @@
 psycopg2-binary
 
 pandas
+numpy
 pyarrow
 
 pyyaml

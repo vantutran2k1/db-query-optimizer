@@ -56,7 +56,7 @@ def initialize_optimizers(config: List[Dict[str, Any]]) -> List[BaseOptimizer]:
                     # It was a different TypeError, re-raise it
                     raise e
             optimizer_instances.append(instance)
-            print(f"  Initialized: {instance.optimizer_name}")
+            print(f"Initialized: {instance.optimizer_name}")
 
         except AttributeError:
             print(
@@ -229,13 +229,6 @@ def main(config_file: str):
             )
 
             # 5. Training Phase
-            # Note: We train *once* before all splits.
-            # For LOO, this is technically "cheating",
-            # as the test query was in the training set.
-            # This matches the paper's "Easiest / Max Leakage"
-            # definition.
-            #
-            # For Base/Random, this loop only runs once.
             if i == 0:  # Only train on the first split
                 training_times = run_training_phase(
                     optimizers,

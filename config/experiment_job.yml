@@ -10,7 +10,6 @@ split_random_seed: 42
 lqo_training_data: "results/job_training_data_cache.parquet"
 
 # List of optimizer *class names* to import and test.
-# These must match the class names in src/optimizers/
 optimizers:
   - name: "PostgresOptimizer"
     config: { } # No config needed

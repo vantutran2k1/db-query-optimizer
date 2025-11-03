@@ -1,6 +1,8 @@
+import re
 from typing import List, Dict, Any, Set, Optional
 
 import numpy as np
+from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.preprocessing import OneHotEncoder
 
 from src.encoding.base import BaseFeaturizer
@@ -12,98 +14,147 @@ class SimpleFeaturizer(BaseFeaturizer):
 
     def __init__(self):
         super().__init__()
+
         self.node_type_encoder: Optional[OneHotEncoder] = None
-        self.vocabulary: List[str] = []
+        self.node_type_vocab: List[str] = []
+
+        self.table_vectorizer: Optional[CountVectorizer] = None
+        self.operator_vectorizer: Optional[CountVectorizer] = None
+
         self.feature_names: List[str] = []
 
-    def fit(self, plan_jsons: List[Dict[str, Any]]) -> None:
+    def fit(self, plan_jsons: List[Dict[str, Any]], query_sqls: List[str]) -> None:
         """
-        Learns the vocabulary of all possible 'Node Type' values
-        from the training plans.
+        Learns vocabularies from both plans (Node Types)
+        and queries (Tables, Operators).
         """
         print("Fitting SimpleFeaturizer...")
-        all_node_types: Set[str] = set()
 
+        # 1. --- Fit Plan Featurizer ---
+        all_node_types: Set[str] = set()
         for plan in plan_jsons:
             nodes = self._walk_tree(plan)
             for node in nodes:
                 all_node_types.add(node["Node Type"])
 
-        self.vocabulary = sorted(list(all_node_types))
-
-        # Initialize the OneHotEncoder
+        self.node_type_vocab = sorted(list(all_node_types))
         self.node_type_encoder = OneHotEncoder(
-            categories=[self.vocabulary],
-            handle_unknown="ignore",  # Ignore node types not seen in training
+            categories=[self.node_type_vocab],
+            handle_unknown="ignore",
             sparse_output=False,
         )
-        # Fit it so it's ready for transform
-        # We fit it on an empty array of the correct shape
-        self.node_type_encoder.fit(np.array(self.vocabulary).reshape(-1, 1))
+        self.node_type_encoder.fit(np.array(self.node_type_vocab).reshape(-1, 1))
 
-        # Generate feature names for interpretability
-        self.feature_names = [f"NodeType_{t}" for t in self.vocabulary]
+        # 2. --- Fit Query Featurizers ---
+        print("Fitting query vocabularies (tables, operators)...")
+        # Table Vectorizer
+        self.table_vectorizer = CountVectorizer(token_pattern=r"[a-zA-Z0-9_]+")
+        table_corpus = [self._extract_tables(q) for q in query_sqls]
+        self.table_vectorizer.fit(table_corpus)
+
+        # Operator Vectorizer
+        self.operator_vectorizer = CountVectorizer()
+        operator_corpus = [self._extract_operators(q) for q in query_sqls]
+        self.operator_vectorizer.fit(operator_corpus)
+
+        # 3. --- Generate Feature Names ---
+        self.feature_names = [f"NodeType_{t}" for t in self.node_type_vocab]
         for num_feat in self.NUMERICAL_FEATURES:
             for agg in self.AGGREGATES:
                 self.feature_names.append(f"{agg}_{num_feat.replace(' ', '_')}")
 
-        self.is_fitted = True
-        print(f"Fit complete. Vocabulary size: {len(self.vocabulary)} nodes.")
-        print(f"Output vector size: {len(self.feature_names)}")
+        # Add new query feature names
+        self.feature_names.extend(["query_len", "num_joins", "num_predicates"])
+        self.feature_names.extend(
+            [f"Tbl_{t}" for t in self.table_vectorizer.get_feature_names_out()]
+        )
+        self.feature_names.extend(
+            [f"Op_{o}" for o in self.operator_vectorizer.get_feature_names_out()]
+        )
 
-    def transform(self, plan_json: Dict[str, Any]) -> np.ndarray:
+        self.is_fitted = True
+        print(f"Fit complete. Vocabulary size: {len(self.node_type_vocab)} nodes.")
+        print(f"Total output vector size: {len(self.feature_names)}")
+
+    def transform(self, plan_json: Dict[str, Any], query_sql: str) -> np.ndarray:
         """
-        Transforms a single plan JSON into a 1D numpy vector.
+        Transforms a single plan/query pair into a 1D numpy vector.
         """
         if not self.is_fitted:
             raise RuntimeError("Featurizer is not fitted. Call .fit() first.")
 
         nodes = self._walk_tree(plan_json)
-
-        # 1. --- Node Type Counts (Categorical) ---
-        node_counts: Dict[str, int] = {node_type: 0 for node_type in self.vocabulary}
+        node_counts: Dict[str, int] = {nt: 0 for nt in self.node_type_vocab}
         for node in nodes:
             node_type = node["Node Type"]
-            if node_type in self.vocabulary:
+            if node_type in self.node_type_vocab:
                 node_counts[node_type] += 1
 
-        # Create a 2D array for the encoder, then flatten
-        # This is the "count vector"
-        node_count_vector = np.array(
-            [node_counts[node_type] for node_type in self.vocabulary]
-        ).reshape(1, -1)
-
-        # The OneHotEncoder here is a bit of a misnomer;
-        # we're just using it to ensure a consistent vector structure.
-        # A better way is just to use the count vector directly.
-        # Let's simplify:
-        ohe_features = np.array(
-            [node_counts[node_type] for node_type in self.vocabulary]
+        plan_ohe_features = np.array(
+            [node_counts[node_type] for node_type in self.node_type_vocab]
         )
 
-        # 2. --- Numerical Feature Aggregation ---
-        numerical_features = []
+        plan_numerical_features = []
         for feat_name in self.NUMERICAL_FEATURES:
-            # Collect all values for this feature from all nodes
-            values = [node[feat_name] for node in nodes if feat_name in node]
+            values = [n[feat_name] for n in nodes if feat_name in n]
             if not values:
-                # Handle case where no node has this feature
                 values = [0.0]
+            plan_numerical_features.append(np.sum(values))
+            plan_numerical_features.append(np.mean(values))
+            plan_numerical_features.append(np.max(values))
+            plan_numerical_features.append(np.min(values))
 
-            # Calculate aggregates
-            numerical_features.append(np.sum(values))
-            numerical_features.append(np.mean(values))
-            numerical_features.append(np.max(values))
-            numerical_features.append(np.min(values))
+        plan_numerical_vector = np.array(plan_numerical_features)
 
-        numerical_vector = np.array(numerical_features)
+        query_len = len(query_sql)
+        num_joins = query_sql.upper().count("JOIN ")
+        num_predicates = query_sql.upper().count("WHERE ") + query_sql.upper().count(
+            "AND "
+        )
+
+        query_scalar_vector = np.array([query_len, num_joins, num_predicates])
+
+        # Token count features
+        table_counts = (
+            self.table_vectorizer.transform([self._extract_tables(query_sql)])
+            .toarray()
+            .flatten()
+        )
+
+        operator_counts = (
+            self.operator_vectorizer.transform([self._extract_operators(query_sql)])
+            .toarray()
+            .flatten()
+        )
 
         # 3. --- Concatenate all features ---
-        final_vector = np.concatenate((ohe_features, numerical_vector)).astype(
-            np.float32
-        )
+        final_vector = np.concatenate(
+            (
+                plan_ohe_features,
+                plan_numerical_vector,
+                query_scalar_vector,
+                table_counts,
+                operator_counts,
+            )
+        ).astype(np.float32)
 
         return final_vector
+
+    @staticmethod
+    def _extract_tables(query_sql: str) -> str:
+        tables = re.findall(
+            r"\bFROM\s+([a-zA-Z0-9_]+)|JOIN\s+([a-zA-Z0-9_]+)", query_sql, re.IGNORECASE
+        )
+        return " ".join([t[0] or t[1] for t in tables])
+
+    @staticmethod
+    def _extract_operators(query_sql: str) -> str:
+        operators = re.findall(
+            r"\b([a-zA-Z0-9_]+\.[a-zA-Z0-9_]+)\s*(=|>|<|>=|<=|LIKE|IN)\b",
+            query_sql,
+            re.IGNORECASE,
+        )
+        return " ".join([op[1] for op in operators])
 
     @staticmethod
     def _walk_tree(node: Dict[str, Any]) -> List[Dict[str, Any]]:

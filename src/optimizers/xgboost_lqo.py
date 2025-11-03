@@ -1,6 +1,7 @@
+import concurrent.futures
 import os
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 
 import numpy as np
 import xgboost as xgb
@@ -12,6 +13,7 @@ from src.encoding.base import BaseFeaturizer
 from src.encoding.featurizers import SimpleFeaturizer
 from src.optimizers.base import BaseOptimizer
 from src.optimizers.baselines import PostgresOptimizer
+from src.optimizers.plan_generator import get_strategic_plan_configs
 from src.pipeline.data_generator import get_plan_forcing_configs
 from src.pipeline.data_utils import load_training_data
 
@@ -22,7 +24,6 @@ class XGBoostLQO(BaseOptimizer):
 
         self._config = config or {}
 
-        # 1. Model & Featurizer Artifacts
         self._model = xgb.XGBRegressor(
             objective="reg:squarederror",
             n_estimators=self._config.get("n_estimators", 100),
@@ -34,15 +35,13 @@ class XGBoostLQO(BaseOptimizer):
         self._featurizer: BaseFeaturizer = SimpleFeaturizer()
         self._is_trained = False
 
-        # 2. Paths for saving/loading
         self._model_path = "models/xgboost_lqo.xgb"
         self._featurizer_path = "models/xgboost_featurizer.joblib"
 
-        # 3. DB Connector for inference
-        self._db_connector = DatabaseConnector()
+        self._training_plan_configs = list(get_plan_forcing_configs())
+        self._inference_plan_configs = get_strategic_plan_configs()
 
-        # 4. Candidate Plan Generator
-        self._plan_configs = list(get_plan_forcing_configs())
+        self._max_workers = os.cpu_count() or 4
 
     def train(self, training_data_path: str, config: Optional[Dict[str, Any]] = None):
         if config:
@@ -51,16 +50,21 @@ class XGBoostLQO(BaseOptimizer):
         print(f"[{self.optimizer_name}] Starting training...")
 
         # 1. Load data
-        plan_jsons, y_log_latencies = load_training_data(training_data_path)
+        plan_jsons, query_sqls, y_log_latencies = load_training_data(training_data_path)
         print(f"Loaded {len(plan_jsons)} training samples.")
 
         # 2. Fit featurizer
         print("Fitting featurizer...")
-        self._featurizer.fit(plan_jsons)
+        self._featurizer.fit(plan_jsons, query_sqls)
 
         # 3. Transform plans
         print("Transforming plans into feature vectors...")
-        X = np.array([self._featurizer.transform(p) for p in tqdm(plan_jsons)])
+        X = np.array(
+            [
+                self._featurizer.transform(p, q)
+                for p, q in tqdm(zip(plan_jsons, query_sqls), total=len(plan_jsons))
+            ]
+        )
         y = y_log_latencies
 
         # 4. Train model
@@ -79,40 +83,41 @@ class XGBoostLQO(BaseOptimizer):
 
     def get_plan(self, query_sql: str) -> Dict[str, Any]:
         if not self._is_trained:
-            self._load_model()
+            try:
+                self._load_model()
+            except FileNotFoundError:
+                return PostgresOptimizer().get_plan(query_sql)
 
         start_time = time.perf_counter()
 
-        # 1. Generate candidate plan JSONs
-        candidate_plans = []  # Stores (settings, plan_json)
-        for settings in self._plan_configs:
-            # Use the lightweight get_plan_json
-            plan_json = get_plan_json(self._db_connector, query_sql, list(settings))
-            if plan_json:
-                candidate_plans.append((settings, plan_json))
+        candidate_data = []
 
-        if not candidate_plans:
-            # Fallback to default PG if no valid plans found
-            print(
-                f"[{self.optimizer_name}] Warning: No valid candidate plans found. Falling back to default."
-            )
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=self._max_workers
+        ) as executor:
+            jobs = {
+                executor.submit(
+                    self._get_plan_and_features, query_sql, settings
+                ): settings
+                for settings in self._inference_plan_configs
+            }
+
+            for future in concurrent.futures.as_completed(jobs):
+                result = future.result()
+                if result:
+                    candidate_data.append(result)
+
+        if not candidate_data:
             return PostgresOptimizer().get_plan(query_sql)
 
-        # 2. Featurize all valid plans
-        features_list = [
-            self._featurizer.transform(p_json) for _, p_json in candidate_plans
-        ]
+        settings_list = [data[0] for data in candidate_data]
+        features_list = [data[2] for data in candidate_data]
         X_candidates = np.array(features_list)
 
-        # 3. Predict latency for all candidates in a batch
         predicted_log_latencies = self._model.predict(X_candidates)
 
-        # 4. Find the best plan
-        # The index of the minimum predicted log-latency
         best_plan_index = np.argmin(predicted_log_latencies)
-
-        # Get the 'settings' for that best plan
-        best_settings = candidate_plans[best_plan_index][0]
+        best_settings = settings_list[best_plan_index]
 
         end_time = time.perf_counter()
         inference_time_ms = (end_time - start_time) * 1000
@@ -137,3 +142,23 @@ class XGBoostLQO(BaseOptimizer):
         self._model.load_model(self._model_path)
         self._featurizer = BaseFeaturizer.load(self._featurizer_path)
         self._is_trained = True
+
+    def _get_plan_and_features(
+        self, query_sql: str, settings: Tuple[str, ...]
+    ) -> Optional[Tuple[Tuple[str, ...], Dict[str, Any], np.ndarray]]:
+        db_conn = None
+        try:
+            db_conn = DatabaseConnector()
+
+            plan_json = get_plan_json(db_conn, query_sql, list(settings))
+            if not plan_json:
+                return None
+
+            features = self._featurizer.transform(plan_json, query_sql)
+            return settings, plan_json, features
+        except Exception as e:
+            print(f"[Worker Error] {e}")
+            return None
+        finally:
+            if db_conn:
+                db_conn.release_connection(db_conn.get_connection())

@@ -13,17 +13,19 @@ class BaseFeaturizer(ABC):
         self.is_fitted = False
 
     @abstractmethod
-    def fit(self, plan_jsons: List[Dict[str, Any]]):
+    def fit(self, plan_jsons: List[Dict[str, Any]], query_sqls: List[str]):
         raise NotImplementedError
 
     @abstractmethod
-    def transform(self, plan_json: Dict[str, Any]) -> np.ndarray:
+    def transform(self, plan_json: Dict[str, Any], query_sql: str) -> np.ndarray:
         raise NotImplementedError
 
-    def fit_transform(self, plan_jsons: List[Dict[str, Any]]) -> np.ndarray:
-        self.fit(plan_jsons)
+    def fit_transform(
+        self, plan_jsons: List[Dict[str, Any]], query_sqls: List[str]
+    ) -> np.ndarray:
+        self.fit(plan_jsons, query_sqls)
 
-        vectors = [self.transform(plan) for plan in plan_jsons]
+        vectors = [self.transform(p, q) for p, q in zip(plan_jsons, query_sqls)]
         return np.array(vectors)
 
     def save(self, filepath: str):
