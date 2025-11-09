@@ -207,7 +207,7 @@ marimo/_lsp/
 __marimo__/
 
 benchmarks/job/data
-results/
+results/job_training_data_cache.parquet
 models/
 
 .DS_Store
