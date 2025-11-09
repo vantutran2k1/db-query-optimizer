@@ -1,4 +1,4 @@
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
 
 import psycopg2
 
@@ -62,7 +62,8 @@ def measure_query(
             return {
                 "actual_latency_ms": actual_latency_ms,
                 "estimated_cost": estimated_cost,
-                "plan_json": plan_json,  # The full plan tree
+                "plan_json": plan_json,
+                "full_explain_json": result_json,
             }
 
     except (psycopg2.Error, ValueError, KeyError) as e:

@@ -1,7 +1,7 @@
 import concurrent.futures
 import os
 import time
-from typing import Dict, Any, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 import xgboost as xgb
@@ -84,7 +84,7 @@ class XGBoostLQO(BaseOptimizer):
     def get_plan(self, query_sql: str) -> Dict[str, Any]:
         if not self._is_trained:
             try:
-                self._load_model()
+                self.load_model()
             except FileNotFoundError:
                 return PostgresOptimizer().get_plan(query_sql)
 
@@ -128,7 +128,7 @@ class XGBoostLQO(BaseOptimizer):
             "inference_time_ms": inference_time_ms,
         }
 
-    def _load_model(self):
+    def load_model(self):
         if not (
             os.path.exists(self._model_path) and os.path.exists(self._featurizer_path)
         ):
