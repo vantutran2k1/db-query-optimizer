@@ -18,3 +18,5 @@ joblib
 matplotlib
 seaborn
 scipy
+
+streamlit

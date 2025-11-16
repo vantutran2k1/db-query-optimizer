@@ -208,6 +208,7 @@ __marimo__/
 
 benchmarks/job/data
 results/job_training_data_cache.parquet
+results/comparison_plans
 models/
 
 .DS_Store
